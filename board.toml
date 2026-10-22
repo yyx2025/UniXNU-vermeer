@@ -51,13 +51,19 @@ archives = [
   "build-native-aes-bindings.py",
   "build-arm-driver.py NativeUfs",
   "build-mockfs-fixture.py",
-  "build-sheng-platform-power.py",
   "build-libpthread-kernel.py",
   "build-arm-driver.py NativeAdreno",
   "build-native-adreno-kits.py",
   "build-native-adreno-accelerator.py",
-  "build-native-legacy-display.py",
 ]
+# Omitted on purpose, unlike sheng:
+#   build-sheng-platform-power.py   verify-proofs against a native-owner-ufs-*-candidate macho that only a
+#                                   live-device GDB session produces (CONFIG_XNU_SHENG_PMGR is off here).
+#   build-native-legacy-display.py  same dependency through audit-mobile-graphics-legacy.py
+#                                   (CONFIG_XNU_NATIVE_LEGACY_DISPLAY is off here).
+# Both features are disabled in configs/vermeer_defconfig, so their symbols are not referenced by the
+# kernel and the archives are not link inputs. Re-adding a builder means first recording the candidate
+# evidence on hardware.
 
 [kernel.prelink]
 tool = "kits/NativePrelink/emit_prelink.py"

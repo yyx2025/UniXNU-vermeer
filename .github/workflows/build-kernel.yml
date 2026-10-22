@@ -45,7 +45,11 @@ jobs:
       - name: Checkout UniXNU build system (with submodules)
         uses: actions/checkout@v4
         with:
-          repository: UniXNU/UniXNU
+          # Fork, not UniXNU/UniXNU upstream: the vermeer-fix branch carries the
+          # XNU_NATIVE_LEGACY_DISPLAY guard on the mobile-graphics legacy display probe that
+          # this board needs (it builds without the legacy display archive).
+          repository: yyx2025/UniXNU
+          ref: vermeer-fix
           submodules: recursive
           path: unixnu
 
@@ -109,7 +113,8 @@ jobs:
       - name: Checkout UniXNU build system (with submodules)
         uses: actions/checkout@v4
         with:
-          repository: UniXNU/UniXNU
+          repository: yyx2025/UniXNU
+          ref: vermeer-fix
           submodules: recursive
           path: unixnu
 
@@ -183,7 +188,8 @@ jobs:
       - name: Checkout UniXNU build system (with submodules)
         uses: actions/checkout@v4
         with:
-          repository: UniXNU/UniXNU
+          repository: yyx2025/UniXNU
+          ref: vermeer-fix
           submodules: recursive
           path: unixnu
 

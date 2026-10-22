@@ -52,18 +52,22 @@ archives = [
   "build-arm-driver.py NativeUfs",
   "build-mockfs-fixture.py",
   "build-libpthread-kernel.py",
-  "build-arm-driver.py NativeAdreno",
-  "build-native-adreno-kits.py",
-  "build-native-adreno-accelerator.py",
 ]
 # Omitted on purpose, unlike sheng:
 #   build-sheng-platform-power.py   verify-proofs against a native-owner-ufs-*-candidate macho that only a
 #                                   live-device GDB session produces (CONFIG_XNU_SHENG_PMGR is off here).
 #   build-native-legacy-display.py  same dependency through audit-mobile-graphics-legacy.py
 #                                   (CONFIG_XNU_NATIVE_LEGACY_DISPLAY is off here).
-# Both features are disabled in configs/vermeer_defconfig, so their symbols are not referenced by the
-# kernel and the archives are not link inputs. Re-adding a builder means first recording the candidate
-# evidence on hardware.
+#   build-arm-driver.py NativeAdreno and the two Adreno kit builders
+#                                   NativeAdrenoService.cpp only compiles clean with -Werror when
+#                                   build/sheng-gmu/ShengGmuSource.h exists, and that header is generated
+#                                   by prepare-sheng-gmu.py from the SHA-pinned Linux a6xx sources plus the
+#                                   sheng compiled DTS. Neither is in a clean checkout, and the K70 GPU is a
+#                                   different instance (GMU 0x3d68000 vs 0x3d6a000, see GPU-PORT.md), so the
+#                                   sheng register set cannot be reused blindly. CONFIG_XNU_NATIVE_ADRENO is
+#                                   off until the vermeer GPU inputs are qualified on hardware.
+# Disabling a feature here means its symbols are not referenced by the kernel and its archive is not a
+# link input. Re-adding a builder means first recording the evidence it verifies on hardware.
 
 [kernel.prelink]
 tool = "kits/NativePrelink/emit_prelink.py"

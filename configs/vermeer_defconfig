@@ -23,7 +23,12 @@ CONFIG_XNU_ZONE_PGZ_ALIGNMENT_PROBE=y
 CONFIG_XNU_NATIVE_ARCH_TIMER=y
 CONFIG_XNU_NATIVE_PAN=y
 CONFIG_XNU_NATIVE_LEGACY_DISPLAY=n
-CONFIG_XNU_NATIVE_ADRENO=y
+# Off: NativeAdrenoService.cpp only compiles with -Werror once build/sheng-gmu/ShengGmuSource.h
+# exists, and prepare-sheng-gmu.py generates that header from SHA-pinned Linux a6xx sources plus the
+# compiled sheng DTS. Neither is in a clean checkout, and the K70 GMU window (0x3d68000) differs from
+# sheng's (0x3d6a000), so the sheng register set is not valid here. Re-enable together with a
+# vermeer-specific GPU input set.
+CONFIG_XNU_NATIVE_ADRENO=n
 
 # Off until the live storage metadata observation is recorded on this device.
 CONFIG_XNU_NATIVE_VIRTIO_BLOCK=n

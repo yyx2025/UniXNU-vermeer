@@ -1,0 +1,16 @@
+# Sources this board adds to the feeds.toml of UniXNU.
+
+# Public Darwin 23 IOStorageFamily. Two consumers here:
+#   * scripts/audit-storage-interface.py builds and checks the block storage ABI
+#     that NativeUfs binds to (it compiles IOBlockStorageDevice.cpp as a reference
+#     object and records the class layout);
+#   * scripts/build-storage-abi.py links it into refer/IOStorageFamily so the
+#     audit can read it.
+# UniXNU's own feeds.toml does not list this source, which is why every board
+# that brings up a block driver declares it (UniXNU#7).
+[[source]]
+name = "IOStorageFamily"
+kind = "refer"
+git = "https://github.com/apple-oss-distributions/IOStorageFamily.git"
+ref = "IOStorageFamily-315"
+commit = "e45fbe30a7879e0b16e26dddb78538f1b00e0bff"

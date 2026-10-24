@@ -1,0 +1,69 @@
+# Kernel configuration of the vermeer verified-root profile.
+#
+# This is vermeer_defconfig plus the owner-root chain, following the combination
+# that UniXNU-qemu proved out end to end (iPadOS 17 to its home screen). The
+# differences from the QEMU board are the ones this board actually needs:
+#
+#   * NativeUfs instead of NativeVirtioBlock: the K70 boots from UFS, and its
+#     block driver is what the verified-root policies authenticate;
+#   * SHENG_PMGR off: the K70 PMGR window differs from sheng's, and the sheng
+#     verify-proofs need a live-device GDB session;
+#   * NATIVE_LEGACY_DISPLAY off: the K70 display chain is not qualified here,
+#     and the UEFI frame buffer is already published by SimpleFbDxe.
+#
+# The verified-root archive is what makes the kernel link: NativeUfs is compiled
+# with -DNATIVE_VERIFIED_BLOCK=1 unconditionally, so without this archive the
+# link ends with _vr_* and IOBlockStorageDevice undefined.
+#
+# scripts/build-os-root.py produces every input this profile names. Run it after
+# "unixnu build package kernel payload" and before "unixnu build kernel".
+
+CONFIG_XNU_BUILD_ARCHIVES=y
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_SOURCE_PTHREAD=y
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_NATIVE_AES=y
+CONFIG_XNU_TRUST_CACHE_RUNTIME=y
+CONFIG_XNU_NATIVE_CS_HASH_CACHE=y
+CONFIG_XNU_DT_PANIC_REGION=y
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+CONFIG_XNU_NATIVE_PAN=y
+CONFIG_XNU_SOURCE_MOCKFS=y
+
+# UFS is the block device this board boots from.
+CONFIG_XNU_NATIVE_UFS=y
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK=n
+# The Data seed stays in memory on this board (no virtio backing store).
+CONFIG_XNU_NATIVE_RAM_BLOCK=y
+
+# The owner-root chain: pmap, policies, mounts, boot manifest.
+CONFIG_XNU_VERIFIED_ROOT_PROBE=y
+CONFIG_XNU_OWNER_ROOT_AUDIT=y
+CONFIG_XNU_OWNER_ROOT_TRUST=y
+CONFIG_XNU_OWNER_CACHE_MOUNT=y
+CONFIG_XNU_OWNER_CACHE_STARTUP=y
+CONFIG_XNU_OWNER_BOOT_MANIFEST=y
+CONFIG_XNU_OWNER_UNION_SYSTEMOS=y
+CONFIG_XNU_OWNER_DATA_MOUNT=y
+
+# Off: the K70 PMGR window differs from sheng's and the sheng verify-proofs need
+# a live-device GDB session (see vermeer_defconfig).
+CONFIG_XNU_SHENG_PMGR=n
+# Off: the K70 display chain is not qualified; SimpleFbDxe publishes the UEFI
+# frame buffer (see vermeer_defconfig).
+CONFIG_XNU_NATIVE_LEGACY_DISPLAY=n
+CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
+# Off: needs build/sheng-gmu/ShengGmuSource.h from SHA-pinned Linux a6xx sources
+# plus the compiled sheng DTS, and the K70 GMU window differs from sheng's.
+CONFIG_XNU_NATIVE_ADRENO=n
+CONFIG_XNU_ARMVIRT_PLATFORM=n
+
+CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
+CONFIG_XNU_VERIFIED_ROOT_ARCHIVE="{tree}/build/verified-root-os-xnu-bundle/libVerifiedRootProbe.a"
+CONFIG_XNU_EXTRA_LD_ARCHIVES=""
+
+# scripts/build-os-root.py prints the Data seed's volume UUID; export it as
+# XNU_OWNER_DATA_VOLUME_UUID for the kernel build. The value below is the seed
+# this repository's CI generates, and is replaced by the export when present.
+CONFIG_XNU_OWNER_DATA_VOLUME_UUID="18AB5557-DC2D-469B-8758-855E60F5B0DF"

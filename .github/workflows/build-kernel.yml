@@ -102,6 +102,192 @@ jobs:
           path: out/vermeer/logs/
           if-no-files-found: warn
 
+  os-root:
+    # Build the inputs the verified-root profile names, then the kernel that
+    # force-loads them. This is the job that exercises the storage-ABI step:
+    # NativeUfs is compiled with -DNATIVE_VERIFIED_BLOCK=1 unconditionally, so
+    # without libVerifiedRootProbe.a the link ends with _vr_* and
+    # IOBlockStorageDevice undefined.
+    #
+    # Runs on macOS because scripts/build-storage-abi.py and build-os-root.py
+    # need xcrun (nm, dwarfdump), hdiutil and diskutil, and because the storage
+    # ABI is captured by booting the candidate kernel in QEMU once.
+    runs-on: macos-15
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout device repository (UniXNU-vermeer)
+        uses: actions/checkout@v4
+
+      - name: Checkout UniXNU build system (with submodules)
+        uses: actions/checkout@v4
+        with:
+          repository: yyx2025/UniXNU
+          ref: vermeer-fix
+          submodules: recursive
+          path: unixnu
+
+      - name: Install build dependencies
+        run: |
+          brew install git make cmake ninja unifdef llvm lld qemu openssl@3 dtc
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          clang --version
+          python3 --version
+          qemu-system-aarch64 --version | head -n 1
+
+      # The storage ABI observation boots the unverified kernel: the verified
+      # profile cannot link until build-os-root.py has produced its archive, so
+      # this job configures twice, exactly like the qemu bring-up does.
+      - name: Configure (defconfig vermeer, for the storage ABI)
+        run: |
+          python3 unixnu/unixnu defconfig vermeer_defconfig -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Checkout Mu-Silicium (BootShim, mkbootimg, panic-screen font)
+        uses: actions/checkout@v4
+        with:
+          repository: yyx2025/uefi-vermeer
+          ref: vermeer
+          path: uefi
+          submodules: false
+
+      - name: Cache the IPSW and its extracted volumes
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/ipsw
+            .cache/firmware
+          key: ipsw-volumes-vermeer-${{ hashFiles('board.toml') }}-v1
+
+      # extract-target-volume.py opens the zip directly, so it needs the whole
+      # file rather than the range-read members the kernel step uses.
+      - name: Download the board IPSW
+        run: |
+          mkdir -p ipsw
+          ipsw=ipsw/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw
+          if [ ! -s "$ipsw" ]; then
+            curl -fL --retry 3 --retry-delay 5 \
+              "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw" \
+              -o "$ipsw"
+          fi
+          ls -l "$ipsw"
+
+      # IOStorageFamily is not named by any build step (UniXNU#7): this repository's
+      # feeds.toml declares it and the fetch puts it under out/feeds, where
+      # build-storage-abi.py links it into refer/IOStorageFamily.
+      - name: Fetch the Apple reference sources (including IOStorageFamily)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu fetch xnu libplatform libdispatch AvailabilityVersions libpthread \
+                          corecrypto-2023 IOStorageFamily \
+                          -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      # build-os-root.py boots the candidate kernel in QEMU to record the storage
+      # ABI, so package, kernel and payload must exist first.
+      # board.toml marks the platform seed as required for the payload, and the
+      # ADT generator refuses a zero chip id, so the observation run uses the
+      # fixed non-zero seed the qemu bring-up uses. It only affects the DT's
+      # software identity, not the ABI.
+      - name: Build package and kernel (vermeer_defconfig, for the storage ABI)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu build package kernel \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build payload (vermeer_defconfig)
+        run: |
+          python3 unixnu/unixnu build payload \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" \
+            --uefi "$GITHUB_WORKSPACE/uefi" \
+            --unique-chip-id 0000000000000001
+
+      - name: Extract the OS trust cache member
+        # build-original-system-trust.py reads the OS volume's companion trust
+        # cache from out/ipsw/<build>/. That file is a zip member
+        # (Firmware/<dmg>.trustcache) and not a manifest component, so
+        # "unixnu ipsw fetch" never extracts it.
+        run: |
+          python3 scripts/extract-ipsw-member.py \
+            "$GITHUB_WORKSPACE/ipsw/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw" \
+            044-76040-038.dmg.trustcache "$GITHUB_WORKSPACE/out/ipsw/21H461"
+
+      - name: Build the OS root inputs (storage ABI, policies, seed, trust cache)
+        env:
+          UNIXNU_UEFI: ${{ github.workspace }}/uefi
+        run: |
+          set -o pipefail
+          cd out/vermeer/tree
+          python3 scripts/build-os-root.py \
+            --ipsw "$GITHUB_WORKSPACE/ipsw/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw" \
+            --openssl-prefix "$(brew --prefix openssl@3)" 2>&1 | tee "$GITHUB_WORKSPACE/os-root.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            printf '%s\n' '::group::build-os-root.py tail'
+            tail -n 120 "$GITHUB_WORKSPACE/os-root.log"
+            printf '%s\n' '::endgroup::'
+            tail -n 20 "$GITHUB_WORKSPACE/os-root.log" | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error::os-root: ${line}"
+            done
+            exit "$status"
+          fi
+
+      # The Data seed's volume UUID is generated, not stored: pass it through to
+      # the verified kernel exactly as the qemu bring-up does.
+      - name: Configure (defconfig vermeer_verified)
+        run: |
+          volume=$(python3 -c "import json;print(json.load(open('out/vermeer/tree/.cache/firmware/owner-data/seed.json'))['volume_uuid'])")
+          printf 'XNU_OWNER_DATA_VOLUME_UUID=%s\n' "$volume" >> "$GITHUB_ENV"
+          python3 unixnu/unixnu defconfig vermeer_verified_defconfig \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build kernel with the verified-root archive linked in
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu build kernel \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Report whether the link resolved the storage symbols
+        if: always()
+        run: |
+          log=out/vermeer/logs/kernel.log
+          if [ ! -f "$log" ]; then
+            echo '::error::kernel.log missing'
+            exit 0
+          fi
+          if grep -q 'Undefined symbols' "$log"; then
+            printf '%s\n' '::group::undefined symbols'
+            sed -n '/Undefined symbols/,/ld: symbol(s) not found/p' "$log" | head -n 80
+            printf '%s\n' '::endgroup::'
+            echo '::error::the link still has undefined symbols'
+          else
+            echo 'link resolved every symbol'
+          fi
+
+      - name: Upload the verified-root kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: vermeer-kernel-verified
+          path: |
+            out/vermeer/kernel/kernel.macho
+            out/vermeer/kernel/kernel.macho.json
+          if-no-files-found: warn
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vermeer-os-root-logs
+          path: |
+            os-root.log
+            out/vermeer/logs/
+          if-no-files-found: warn
+
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 120

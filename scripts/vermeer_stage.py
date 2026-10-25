@@ -22,7 +22,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORK = ROOT.parent / 'out' / 'vermeer'
+# CI layout: scripts run from out/vermeer/tree (resolved to the linked tree, not
+# the checkout), so ROOT.parent is out/vermeer and every build product (kernel/,
+# payload/, package/, logs/) sits directly under it — the same convention
+# UniXNU-qemu's qemu_esp.py relies on.
+WORK = ROOT.parent
+FEEDS = WORK.parent / 'feeds'
 
 # Where the board's firmware looks for each file (FAT volume layout).
 EFI_BOOT = Path('EFI/BOOT/BOOTAA64.EFI')

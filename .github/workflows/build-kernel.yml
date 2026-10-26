@@ -103,6 +103,13 @@ jobs:
           if-no-files-found: warn
 
   os-root:
+    # Off by default: this job is stage B. It needs the storage ABI recorded from a live
+    # device (build/storage-abi/interface-audit.json) and the volume policies that
+    # scripts/build-os-root.py expects, none of which a clean checkout carries - so it
+    # fails at its payload step today and holds a 360-minute macOS runner while doing it.
+    # It is also not a dependency of bootimg. Turn it on with the repository variable
+    # UNIXNU_ENABLE_OS_ROOT=1 once the observation exists for this board.
+    if: vars.UNIXNU_ENABLE_OS_ROOT == '1'
     # Build the inputs the verified-root profile names, then the kernel that
     # force-loads them. This is the job that exercises the storage-ABI step:
     # NativeUfs is compiled with -DNATIVE_VERIFIED_BLOCK=1 unconditionally, so

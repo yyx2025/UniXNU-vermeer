@@ -267,6 +267,25 @@ def load_segments(data):
         offset += size
 
 
+def exec_segments(data):
+    """(vmaddr, vmsize, fileoff, filesize, initprot) for every segment that has file content."""
+    magic, _, _, _, ncmds = struct.unpack_from('<IiiII', data, 0)
+    if magic != 0xFEEDFACF:
+        raise SystemExit('Not a 64-bit Mach-O')
+    out = []
+    offset = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from('<II', data, offset)
+        if cmd == 0x19:
+            name, vmaddr, vmsize, fileoff, filesize, _maxprot, initprot = struct.unpack_from(
+                '<16sQQQQii', data, offset + 8)
+            if filesize:
+                out.append((name.rstrip(b'\0').decode(errors='replace'),
+                            vmaddr, vmsize, fileoff, filesize, initprot))
+        offset += size
+    return out
+
+
 def unixthread_pc(data):
     """LC_UNIXTHREAD entry pc (arm64 thread state: flavor, count, x0..x28, fp, lr, sp, pc)."""
     offset = 32
@@ -373,8 +392,67 @@ def main():
     for va, value in expected.items():
         if word(va) != value:
             raise SystemExit(f'{va:#x} holds {word(va):#010x}, expected {value:#010x}: not the kernel these probes are for')
+    def cave_free(va):
+        return not any(data[file_offset(va):file_offset(va) + CAVE_SIZE])
+
+    def relocate_caves():
+        """Move the caves into a free run when the kernel does not use the fixed layout.
+
+        The four cave addresses above are padding in the layout these probes were written
+        for. A kernel built with a different component set (drivers off, other archives)
+        links elsewhere, so that padding is real code. Pick a zero run in an executable
+        segment that every probe site can branch to (B/BL reaches +-128 MB) and lay the
+        caves plus the panic screen out inside it. The fixed layout stays the first
+        choice, so a kernel that matches it is patched exactly as before.
+        """
+        panic_budget = PANIC_CAVE_END - (max(CAVES.values()) + CAVE_SIZE)
+        budget = CAVE_SIZE * len(CAVES) + panic_budget
+        sites_va = [ENTRY_VA, MMU_ENABLE_VA]
+        if not args.no_reset:
+            sites_va.append(AFTER_MMU_VA)
+        best = None
+        for name, vmaddr, vmsize, fileoff, filesize, initprot in exec_segments(data):
+            if not (initprot & 4) or not filesize:
+                continue
+            # __PLK_* is prelink placeholder space: it is zero in the file but is not
+            # necessarily mapped executable at runtime, so never put code there.
+            if name.startswith('__PLK'):
+                continue
+            blob = data[fileoff:fileoff + filesize]
+            index = 0
+            while index < len(blob):
+                if blob[index]:
+                    index += 1
+                    continue
+                start = index
+                while index < len(blob) and not blob[index]:
+                    index += 1
+                if index - start < budget:
+                    continue
+                va = vmaddr + start
+                if any(abs(va - site) >= 0x7F000000 for site in sites_va):
+                    continue
+                # Prefer the kernel's own text segments over loader areas (__KLD is
+                # reserved for injected kexts), then take the tightest run that still
+                # holds the caves, so the probe stays in padding rather than in a
+                # region something else may claim later.
+                rank = 0 if name in ('__TEXT_EXEC', '__TEXT') else 1
+                if best is None or (rank, index - start) < (best[2], best[1]):
+                    best = (va, index - start, rank)
+        if best is None:
+            raise SystemExit(
+                'the fixed probe caves are not padding in this kernel and no free '
+                f'executable run of {budget:#x} bytes is within branch range of the probe sites')
+        base = best[0]
+        for stage in sorted(CAVES):
+            CAVES[stage] = base + CAVE_SIZE * (stage - 1)
+        globals()['PANIC_CAVE_END'] = base + CAVE_SIZE * len(CAVES) + panic_budget
+        print(f'probe caves relocated to {base:#x} ({best[1]:#x} free bytes, panic budget {panic_budget:#x})')
+
+    if not all(cave_free(va) for va in CAVES.values()):
+        relocate_caves()
     for va in CAVES.values():
-        if any(data[file_offset(va):file_offset(va) + CAVE_SIZE]):
+        if not cave_free(va):
             raise SystemExit(f'Padding at {va:#x} is not empty')
 
     # (site, cave stage, symbols the cave is linked with)

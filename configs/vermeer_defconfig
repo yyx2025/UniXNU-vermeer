@@ -12,7 +12,17 @@ CONFIG_XNU_SOURCE_CORECRYPTO14=y
 CONFIG_XNU_SOURCE_PTHREAD=y
 CONFIG_XNU_ARM_DT_PLATFORM=y
 CONFIG_XNU_ARMCPU=y
-CONFIG_XNU_NATIVE_UFS=y
+# Off for the first boot: NativeUfs is compiled with -DNATIVE_VERIFIED_BLOCK=1 and its
+# NativeUfsBlock subclasses IOBlockStorageDevice. That base class lives in Apple's
+# IOStorageFamily, whose implementation only reaches the link through
+# build/verified-root-xnu/libVerifiedRootProbe.a (scripts/build-os-root.py). With
+# VERIFIED_ROOT_PROBE=n below, the final link ends with undefined
+# IOBlockStorageDevice::* from libNativeUfs.a(NativeUfs.o). Keep the two in step:
+# re-enable this only together with the verified-root chain, after the storage
+# observation for this board exists. Without UFS the bring-up kernel has no block
+# device and stops at "waiting for root device" on the console - which is exactly
+# what the first boot is meant to show.
+CONFIG_XNU_NATIVE_UFS=n
 CONFIG_XNU_NATIVE_AES=y
 CONFIG_XNU_TRUST_CACHE_RUNTIME=y
 CONFIG_XNU_SOURCE_MOCKFS=y

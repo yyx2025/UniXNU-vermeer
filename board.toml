@@ -140,7 +140,13 @@ BUILDID_STRING = "vermeer-research"
 
 [payload]
 volume = "VERMEERESP"
-size_mib = 192
+# 64 MiB, not 192: `fastboot boot` downloads the whole boot image into a buffer the
+# stock ABL allocates before it starts, and 198 MB of it is refused part-way through
+# the transfer ("Device sent unknown status code"). The volume really holds the
+# prelinked kernel (about 52 MiB) plus the ADT and the trust cache, so 64 MiB is the
+# size the first boot needs. Raise it only together with a storage stage that adds
+# images, and re-check that `fastboot boot` still accepts the result.
+size_mib = 64
 loader = "firmware"
 title = "vermeer first boot: source 4K XNU to console"
 dram_size = "0x80000000"             # conservative first-boot window, as sheng

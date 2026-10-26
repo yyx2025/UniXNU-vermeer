@@ -171,8 +171,14 @@ kernel_args = [
   "boot-progress=2",
   "-apfs_shared_datavolume",
   "offline-key-events=1",
-  "native-ufs-root=1",
-  "sheng-pmgr=2",
+  # Not with the bring-up profile: payload.py refuses native-ufs-root unless the kernel
+  # defines _sheng_pmgr_run (and sheng-pmgr=2 is present), because the unchanged target
+  # AMFI panics with "No PMGR" when a UFS root is announced without the PMGR integration.
+  # CONFIG_XNU_NATIVE_UFS and CONFIG_XNU_SHENG_PMGR are both off here, so the UFS root
+  # argument has to go with them. Restore all three together once the storage observation
+  # and the PMGR verify-proofs exist for this board.
+  # "native-ufs-root=1",
+  # "sheng-pmgr=2",
   "armcpu-diagnostics=1",
   "sheng-disable-watchdogd=1",
   "sheng-disable-jobs=com.apple.identityservicesd,com.apple.locationd,com.apple.CommCenter,com.apple.bluetoothd",

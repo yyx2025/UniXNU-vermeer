@@ -84,6 +84,8 @@ fastboot oem get-partition-info userdata      # 或 GPT dump
 
 另外别忘 **edge touch**：从屏幕边缘起手的触摸必须标记为边缘触摸，否则上滑回不到主屏。
 
+还有一处会白白浪费时间：`board.toml` 现在带着 `sheng-touch=4`，首启一通过，`TouchProbe` 就会按 NT36532E 的流程去 vote QUP 时钟、复位触摸 bootloader、读 chip id。K70 上没有这颗芯片，这一串必然在第一步之后就失败。**首启验收通过后第一件事就是把它改回 `0`**，等 GT9916S 驱动写出来再换成对应的 stage。`proprietary-files.txt` 里的 `novatek_nt36532_n81a_fw_csot.bin` 同理，是 sheng 的固件，删掉不影响构建（`native_touch_firmware` 声明为 `weak_import`）。
+
 ### 4.4 GPU 的 GMU 窗不同
 `CONFIG_XNU_NATIVE_ADRENO=n` 的原因写在 defconfig 里：K70 的 GMU 窗是 `0x3d68000`，sheng 是 `0x3d6a000`；`prepare-sheng-gmu.py` 还需要 SHA 固定的 Linux a6xx 源 + sheng 编译后的 DTS。恢复要连同 vermeer 自己的 GPU 输入集一起做。
 

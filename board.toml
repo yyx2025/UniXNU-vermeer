@@ -204,13 +204,29 @@ kernel_args = [
   "-no_slto_panic",
   "ml-timeout-lock-panic-scale=40",
   "sheng-touch-hid=1",
-  "sheng-data-persist=2",
+  # 1, not 2: 2 opens the Data store window for writes below the log reserve.
+  # With CONFIG_XNU_NATIVE_UFS = n there is no store to write, and the bring-up
+  # profile must stay physically unable to touch userdata - the only writer on
+  # this path is the menu's own "reset" action.
+  "sheng-data-persist=1",
 ]
 
 [payload.adt]
 tool = "scripts/make-vermeer-adt.py"
 chip_id = "207"
-owned_memory_size = "0x130000000"
+# DarwinBoot reserves one *contiguous* run of conventional memory of this size and
+# places the kernel window inside it; the ADT value is that request, not a hint.
+# 0x130000000 (4.75 GiB, the sheng value) cannot be met on vermeer: the board runs
+# with VERMEER_VENDOR_HW = 0, so VermeerBootMemoryDxe builds the memory map itself
+# and adds at most 1 GiB below 4 GiB in pieces of 16 MiB or more. A 4.75 GiB request
+# therefore always fails with EFI_OUT_OF_RESOURCES and the loader returns to the
+# menu ("first boot does nothing"). The prelinked kernel spans 0x42f6000 (66 MiB)
+# from 0xfffffff00427c000 to 0xfffffff008572000, and this profile carries no ramdisk
+# and no trust cache, so 256 MiB - the loader's own default - is the request that
+# asks for the least contiguous memory while still holding the image, the ADT and
+# the boot_args. Raise it only together with a storage stage (Data seed / trust
+# cache) and re-check the largest conventional-memory run on the device first.
+owned_memory_size = "0x10000000"
 root_match_volume_uuid = "04769D26-2CA0-4825-B443-E2E5F88300F2"
 cpu_regs = "0,0x100,0x200,0x300,0x400,0x500,0x600,0x700"
 packed_data_ramdisk = true

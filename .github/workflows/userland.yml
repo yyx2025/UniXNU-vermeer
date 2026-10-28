@@ -139,6 +139,19 @@ jobs:
           m = img[launch_off:launch_off + launch_size]
           if struct.unpack_from('<I', m, 0)[0] != 0xfeedfacf:
               print('launch file is not a 64-bit Mach-O'); ok = False
+          # No dynamic linker: this root has no dyld, so a LOAD_DYLINKER command
+          # would make the kernel hand the image to something that is not there.
+          ncmds, = struct.unpack_from('<I', m, 16)
+          off, cmds = 32, set()
+          for _ in range(ncmds):
+              cmd, size = struct.unpack_from('<II', m, off)
+              cmds.add(cmd)
+              off += size
+          for name, code in (('LC_LOAD_DYLINKER', 0x0e), ('LC_LOAD_DYLIB', 0x0c),
+                             ('LC_CODE_SIGNATURE', 0x1d)):
+              print(f'{"has" if code in cmds else "no "} {name}')
+          if 0x0e in cmds or 0x0c in cmds or 0x1d not in cmds:
+              print('load commands are not those of a signed static image'); ok = False
           if b'\xfa\xde\x0c\xc0' not in m:
               print('no embedded signature SuperBlob'); ok = False
           tc = pathlib.Path('userland-build/kernel.macho.trustcache').read_bytes()

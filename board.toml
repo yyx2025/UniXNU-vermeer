@@ -153,6 +153,21 @@ size_mib = 64
 # entries. Raise this only for an image that also carries an OS volume.
 size_mib_userland = 64
 userland_title = "vermeer userland: boot to the first EL0 process (rd=md0)"
+# The countdown boots the RAM root with this minimal line; the full bring-up line below stays
+# available as the "userland-full" menu entry. Reason: the full line enables dozens of hardware
+# probes (sheng-*, offline-*, armcpu-*), and on this board the kernel dies with
+#   ASSERT [ArmCpuDxe] CpuExceptionHandlerLib.c(438): ((BOOLEAN)(0==1))
+#   Synchronous exception ... ESR: EC 0x25 IL 0x1 ISS 0x00000010
+# i.e. a same-EL data abort whose DFSC is "synchronous external abort" - an MMIO access nothing
+# answered. ELR was not the kernel entry (it would imply a non-4K-aligned load base), so XNU ran a
+# while and then touched hardware. With the probes off, reaching the first EL0 process separates
+# "the board cannot take these probes" from "the RAM root itself does not mount".
+userland_args = [
+  "-v",
+  "serial=3",
+  "debug=0x14e",
+  "kt_fixed_zones=120",
+]
 loader = "firmware"
 title = "vermeer first boot: source 4K XNU to console"
 dram_size = "0x80000000"             # conservative first-boot window, as sheng

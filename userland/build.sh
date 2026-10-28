@@ -55,7 +55,11 @@ CFLAGS=(
 "$CC" "${CFLAGS[@]}" -c "$here/init.c"  -o "$out/init.o"
 
 link() {
+    # -headerpad reserves room in the load-command area: adhoc.py has to insert
+    # LC_CODE_SIGNATURE there, exactly like codesign would, and lld otherwise
+    # packs the sections right behind the commands with no gap.
     "$LD" -arch arm64 -platform_version ios 17.0 17.0 -static -e _start \
+        -headerpad 0x800 \
         -o "$out/launchd.macho" "$out/start.o" "$out/libc.o" "$out/init.o" "$@"
 }
 

@@ -206,7 +206,11 @@ def main():
         # CodeDirectory records for exec-segment hardening.
         _, text_fileoff, text_filesize = macho.segment(b'__TEXT')
 
-        code_limit = (len(macho.data) + 15) & ~15
+        # Align the code limit to a whole page, not merely to 16 bytes. Apple's
+        # verifier hashes min(page, limit - offset) for the last page, so a short
+        # final page leaves two readings of the same bytes; a page-aligned limit
+        # makes the last page complete and removes the question.
+        code_limit = (len(macho.data) + 0xFFF) & ~0xFFF
         slots = [b'\0' * 32] * ((code_limit + 4095) // 4096)
         cd = build_codedirectory(args.identifier, code_limit, slots,
                                  text_fileoff, text_filesize)

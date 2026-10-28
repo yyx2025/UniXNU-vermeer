@@ -53,12 +53,52 @@ DarwinBoot 侧的接口也现成：ADT 生成器的 `--ramdisk` 只往 `/chosen/
   ADT 多一个 `RAMDisk` 占位符，`unixnu.toml` 多一个 `rd=md0` 的 entry（`id = "userland"`），
   默认 entry 不变。卷大小取 `[payload] size_mib_userland`（本板 240），默认 entry 仍是 64 MiB。
 - `scripts/make-vermeer-adt.py --ramdisk` 只写占位符，不写 `ephemeral-storage`（那是 Data 种子专用）。
-- 未做：IMG4 外壳的剥离（`im4p_payload()` 已有）、`044-75545-038.dmg` 里 APFS 容器前面那 32 字节
-  的头（`nx_superblock` 在 payload +32，块数与总长又恰好等于整个 payload，两者差 32 字节，
-  说明这 32 字节就是容器第 0 块的一部分而不是外壳）。这两点要等内核真的走到 `bsd_init` 再验。
+- 外壳已经算清：`044-75545-038.dmg` 共 184,549,403 字节 = **27 字节 IM4P 头** + 184,549,376 字节
+  APFS 容器。容器起点 27 可以直接验证：`nx_superblock` 的魔数 `NXSB` 落在文件偏移 59，即容器内 32
+  （块 0 的 `nx_magic` 字段），而 `nx_block_size`(4096) × `nx_block_count`(45056) 又恰好等于
+  184,549,376。所以 `userland.img` = 去掉前 27 字节的原文件，不需要再解析任何外壳。
 
 ## 5. 顺序
 
 1. 先把固件那个 `ASSERT ((BOOLEAN)(0==1))` 的死循环解决 —— 现在内核还没跑到 EL1 入口，用户态再小也轮不到。
 2. 再验 `fastboot boot` 能不能吃下 ~241 MiB。
 3. 都过了，才轮到 APFS 挂 `md0` 和 launchd。
+
+## 6. 实际打出来的那张包（2026-10-29）
+
+按上面第 2 条的上限打了一张，尺寸卡在 `fastboot boot` 的临时启动范围里，**不写任何分区**：
+
+| 项 | 值 |
+| --- | --- |
+| 镜像 | `work/big/boot/boot-big.img` |
+| 大小 | 253,206,528 字节（241.48 MiB），低于 ABL 常见的 256 MiB 下载上限 |
+| sha256 | `a25cb9c08970fceb911548059340b4cf6db60d251b8c0d72a01157fcb2855bc8` |
+| 内核段 | 1,540,486 字节，与 CI 的 `boot.img` 逐字节相同（`80fa29e1…`） |
+| ramdisk | 240 MiB 的 FAT32 卷，落址 `0x01000000`–`0x10000000` |
+| 卷内 | `kernel.macho` 51.5 MiB + `kernel.macho.adt` 13 KiB + `userland.img` 176 MiB + `unixnu.toml` |
+
+`userland.img` 是剥离外壳后的 176 MiB APFS 容器，就是 `RestoreRamDisk` 的全部内容——恢复用户态
+（launchd、dyld shared cache、`/System`）都在里面，不是只放了个空壳。
+
+两个 entry：`userland`（默认，`rd=md0`）和 `console`（原来的内核控制台）。倒计时 3 秒后进
+`userland`，3 秒内按上/下键可以退回 `console`。
+
+窗口算术，确认不会撞上 `EFI_BAD_BUFFER_SIZE`：
+内核跨 0x42F6000（67.0 MiB）+ boot_args 一页 + ADT 13 KiB 对齐 + ramdisk 176 MiB = 243.0 MiB，
+上限是 `WindowSize - BLOCK_SIZE` = 254 MiB，余 11 MiB。
+
+### 这张包是用什么打的
+
+`scripts/mk-payload-volume.py`——CI 用 `mformat`/`mcopy`，本机没有 mtools 时用它生成**同样布局**的
+FAT32 卷（512 字节扇区、单扇区簇、32 保留扇区、双 FAT、长文件名）。文件按给定顺序连续分配，
+所以镜像可复现；读回校验过每个文件的 sha256 与源文件一致。
+
+### 失败怎么读
+
+- `fastboot: error: cannot load 'boot-big.img': data too large` 之类的**发送前**报错 = 超过
+  `max-download-size`，跑一条 `fastboot getvar max-download-size` 就知道上限，然后按比例砍
+  `size_mib_userland`。
+- 传到一半 `Sending ... FAILED (Device sent unknown status code)` = 链路（这根线换过尾插小板，
+  已知会随机掉线），不是尺寸。
+- 传输成功、`fastboot boot` 后又落回菜单 = 内存窗口；屏上会有 `NO WINDOW … BIG RUN …`。
+- 屏幕停在 `ASSERT [...](0==1)` = 固件断言，和这张包无关，先在**小包**上解决它再回来。

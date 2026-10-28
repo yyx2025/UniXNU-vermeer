@@ -1,0 +1,191 @@
+name: userland
+
+# Build the vermeer userland image and fold it into a boot image.
+#
+# The kernel and the firmware come from an earlier build-kernel run: this workflow only
+# compiles userland/ (a static Mach-O, ad-hoc signed, wrapped in the N4KROOT container that
+# mockfs understands) and then runs the normal payload + bootimg steps with `--userland`.
+#
+# Inputs:
+#   source_run      id of a build-kernel run that produced vermeer-kernel and vermeer-firmware
+#   unique_chip_id  platform seed for the ADT (8-byte hex)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: 'Run id that produced vermeer-kernel and vermeer-firmware'
+        required: true
+      unique_chip_id:
+        description: 'Platform seed (8-byte hex) for the ADT'
+        required: false
+        default: '0000000000000001'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  userland:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout device repository (UniXNU-vermeer)
+        uses: actions/checkout@v4
+
+      - name: Checkout UniXNU build system (with submodules)
+        uses: actions/checkout@v4
+        with:
+          repository: yyx2025/UniXNU
+          ref: vermeer-fix
+          submodules: recursive
+          path: unixnu
+
+      - name: Checkout Mu-Silicium device firmware (uefi-vermeer)
+        uses: actions/checkout@v4
+        with:
+          repository: yyx2025/uefi-vermeer
+          ref: vermeer
+          submodules: recursive
+          path: uefi
+
+      - name: Download the prelinked kernel from the source run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p out/vermeer/kernel
+          gh run download "${{ inputs.source_run }}" -R "${{ github.repository }}" \
+            -n vermeer-kernel -D out/vermeer/kernel
+          ls -l out/vermeer/kernel
+
+      - name: Download the firmware volume from the source run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p firmware-artifact
+          gh run download "${{ inputs.source_run }}" -R "${{ github.repository }}" \
+            -n vermeer-firmware -D firmware-artifact
+          find firmware-artifact -name 'SILICIUM_UEFI.fd' -print
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build device-tree-compiler mtools \
+            python3 python3-pip clang lld llvm git curl
+          python3 -m pip install --break-system-packages -r uefi/pip-requirements.txt
+
+      - name: Provide unversioned LLVM tools
+        run: |
+          mkdir -p "$HOME/llvm-bin"
+          for tool in llvm-nm llvm-objcopy llvm-size llvm-readelf llvm-ar llvm-strip \
+                      ld.lld clang ld64.lld; do
+            found="$(command -v "$tool" || true)"
+            if [ -z "$found" ]; then
+              found="$(compgen -c "$tool-" | sort -V | tail -n 1 || true)"
+              found="$(command -v "$found" || true)"
+            fi
+            if [ -z "$found" ]; then
+              echo "::warning::Cannot find $tool"
+              continue
+            fi
+            ln -sf "$found" "$HOME/llvm-bin/$tool"
+          done
+          echo "$HOME/llvm-bin" >> "$GITHUB_PATH"
+          ls -l "$HOME/llvm-bin"
+
+      - name: Build the userland image
+        run: |
+          bash userland/build.sh "$GITHUB_WORKSPACE/userland-build"
+
+      - name: Verify the image the way mockfs will read it
+        run: |
+          python3 - <<'PY'
+          import json, struct, pathlib, sys
+          img = pathlib.Path('userland-build/userland.img').read_bytes()
+          magic, version, count, launch_off, launch_size, test_off, test_size = \
+              struct.unpack_from('<8sII4Q', img, 0)
+          rep = json.loads(pathlib.Path('userland-build/userland.json').read_text())
+          print(f'magic={magic!r} version={version} count={count}')
+          print(f'launch {launch_size} @ {launch_off}, test {test_size} @ {test_off}, total {len(img)}')
+          print(f'cdhash {rep["cdhash"]}, code_limit {rep["code_limit"]}, pages {rep["pages"]}')
+          ok = (magic == b'N4KROOT\x00' and version == 1 and count == 2
+                and launch_off == 4096 and launch_size > 0 and test_size > 0
+                and test_off % 4096 == 0 and test_off >= 8192
+                and launch_size <= test_off - launch_off
+                and test_size <= len(img) - test_off
+                and len(img) <= 32 * 1024 * 1024)
+          # The launch file must really be the signed Mach-O, header and cdhash included.
+          m = img[launch_off:launch_off + launch_size]
+          if struct.unpack_from('<I', m, 0)[0] != 0xfeedfacf:
+              print('launch file is not a 64-bit Mach-O'); ok = False
+          if b'\xfa\xde\x0c\xc0' not in m:
+              print('no embedded signature SuperBlob'); ok = False
+          tc = pathlib.Path('userland-build/kernel.macho.trustcache').read_bytes()
+          cdcnt, cdoff = struct.unpack_from('<2I', tc, 0)
+          if cdcnt != 1 or cdoff != 8 or struct.unpack_from('<I', tc, 8)[0] != 2:
+              print('trust cache header is not version-1/version-2'); ok = False
+          entries = struct.unpack_from('<I', tc, 28)[0]
+          entry = tc[32:32 + 20].hex()
+          print(f'trust cache: {entries} entry, cdhash {entry}')
+          if entry != rep['cdhash']:
+              print('trust cache does not name the signature that was embedded'); ok = False
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Place the firmware volume where the driver expects it
+        run: |
+          mkdir -p "uefi/Build/vermeerPkg/DEBUG_CLANGPDB/FV"
+          cp "$(find firmware-artifact -name 'SILICIUM_UEFI.fd' | head -n 1)" \
+             "uefi/Build/vermeerPkg/DEBUG_CLANGPDB/FV/SILICIUM_UEFI.fd"
+          ls -l "uefi/Build/vermeerPkg/DEBUG_CLANGPDB/FV/SILICIUM_UEFI.fd"
+
+      - name: Configure (defconfig vermeer)
+        run: |
+          python3 unixnu/unixnu defconfig vermeer_defconfig -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build the payload volume with the userland as the RAM root
+        env:
+          UNIXNU_UNIQUE_CHIP_ID: ${{ inputs.unique_chip_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu build payload \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" \
+            --uefi "$GITHUB_WORKSPACE/uefi" \
+            --kernel "$GITHUB_WORKSPACE/out/vermeer/kernel/kernel.macho" \
+            --userland "$GITHUB_WORKSPACE/userland-build/userland.img" \
+            --owner-trust-cache "$GITHUB_WORKSPACE/userland-build/kernel.macho.trustcache" \
+            --unique-chip-id "$UNIXNU_UNIQUE_CHIP_ID"
+
+      - name: Pack the boot image (BootShim + FD + DTB + payload)
+        run: |
+          python3 unixnu/unixnu bootimg \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" \
+            --uefi "$GITHUB_WORKSPACE/uefi" \
+            --dtb "$GITHUB_WORKSPACE/scripts/data/vermeer.dtb"
+
+      - name: Upload the boot image
+        uses: actions/upload-artifact@v4
+        with:
+          name: vermeer-boot-userland
+          path: |
+            out/vermeer/boot/boot.img
+            out/vermeer/boot/boot.json
+            out/vermeer/payload/payload.img
+            out/vermeer/payload/payload.json
+            userland-build/userland.img
+            userland-build/launchd.macho
+            userland-build/kernel.macho.trustcache
+            userland-build/userland.json
+            userland-build/n4kroot.json
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vermeer-userland-logs
+          path: |
+            out/vermeer/logs/
+            userland-build/link.log
+          if-no-files-found: warn

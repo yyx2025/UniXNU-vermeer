@@ -147,12 +147,12 @@ volume = "VERMEERESP"
 # size the first boot needs. Raise it only together with a storage stage that adds
 # images, and re-check that `fastboot boot` still accepts the result.
 size_mib = 64
-# The RAM-root entry ("build payload --userland FILE") carries a whole filesystem next to the
-# kernel, so it gets its own ceiling: 52 MiB of kernel + 176 MiB of restore ramdisk is 228 MiB,
-# rounded up. That is above the 198 MB the stock ABL already refused, so this entry is a transfer
-# experiment as much as a boot experiment; the console entry above stays at 64 MiB until it is known
-# which side of the limit the boot image really falls on.
-size_mib_userland = 240
+# The RAM-root entry ("build payload --userland FILE") carries a filesystem next to the kernel, so it
+# may ask for its own ceiling. With userland/userland.img - one static Mach-O plus a second file, a few
+# hundred KiB - the kernel is still the only large thing in the volume, so 64 MiB is enough for both
+# entries. Raise this only for an image that also carries an OS volume.
+size_mib_userland = 64
+userland_title = "vermeer userland: boot to the first EL0 process (rd=md0)"
 loader = "firmware"
 title = "vermeer first boot: source 4K XNU to console"
 dram_size = "0x80000000"             # conservative first-boot window, as sheng
@@ -198,7 +198,7 @@ kernel_args = [
   "boot-ui-focus4=SpringBoard",
   "sheng-smp=1",
   "sheng-cpufreq=3",
-  "sheng-touch=4",
+  "sheng-touch=0",
   "sheng-aks=1",
   "sheng-gpu-power=9",
   "sheng-gpu-metal=1",

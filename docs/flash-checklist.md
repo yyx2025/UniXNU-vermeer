@@ -143,6 +143,51 @@ fastboot boot boot.img
 
 **不写任何分区**。传输成功后会看到 UEFI 画面 → UniXNU 菜单（3 秒倒计时）→ 内核。
 
+这条路径为什么在物理上碰不到 userdata：
+
+- `fastboot boot` 是 ABL 把整个 boot 镜像下载到 RAM 再跳转，不经过任何 `flash` 分区；
+- payload 卷是 boot 镜像的 ramdisk，同样在 RAM 里；
+- 内核 `CONFIG_XNU_NATIVE_UFS=n`，UFS 驱动没有编进内核，XNU 没有访问闪存的代码路径；
+- boot-args 里 `native-ufs-root` 是注释掉的，`sheng-data-persist=1` 只做只读校验；
+- 唯一的写入可能是菜单里的 `reset` 动作，它写的是 BIOS 重启寄存器，不是存储。
+
+所以任何时候断电、重启、`fastboot reboot`，都原样回 HyperOS。
+
+## 2.1 菜单里选了 first boot，屏幕闪一下又回菜单
+
+这不是「菜单没反应」，而是 DarwinBoot 把启动**拒绝了**，UniXNU 在菜单底部写一行
+`'<标题>' returned: <状态>`。最常见的状态是 `Out of resources`，含义只有一个：
+
+> ADT 里的 `darwinboot-memory-size` 要一整块**连续**常规内存，UEFI 给不出来。
+
+DarwinBoot 不是把内核「放进任意空隙」，而是先用 `AllocatePages(AllocateAddress)` 占一整段
+连续内存当内核窗口，再把 Mach-O 各段拷进窗口内的固定偏移。窗口要多大，由
+`kernel.macho.adt` 里 `/chosen` 的 `darwinboot-memory-size`（8 字节）决定，**不是提示，是硬请求**。
+
+K70 上必须记住两条约束：
+
+| 约束 | 原因 |
+| --- | --- |
+| `VERMEER_VENDOR_HW = 0` | 没有高通的内存管理器，`VermeerBootMemoryDxe` 自己拼内存映射 |
+| 它最多加 1 GiB、必须在 4 GiB 以下、每片 ≥ 16 MiB | `ADD_LIMIT` / `ADD_BELOW` / `MIN_PIECE_SIZE` |
+
+所以照抄 sheng 的 `0x130000000`（4.75 GiB）在 K70 上**永远分配不到**。当前值 256 MiB 的依据：
+
+- 内核虚拟跨度 `0xfffffff00427c000` → `0xfffffff008572000`，只有 `0x42f6000`（66 MiB）；
+- 本 profile 无 ramdisk、无 trust cache，窗口里只有内核 + `boot_args` + ADT；
+- 256 MiB 同时也是 DarwinBoot 自带的默认值（`WINDOW_SIZE`）。
+
+失败时屏幕还会画诊断行，**把这行拍下来就能直接定下一个值**：
+
+```
+NO WINDOW 10000000 BIG RUN <最大连续块> @ <起始地址>
+FREE <基址> + <长度>      （最多 8 行）
+```
+
+`BIG RUN` 就是 UEFI 眼里最大的一块连续常规内存。窗口只能小于它。
+256 MiB 已是 `DarwinWindowSizeValid` 的下限（`0x10000000`），再往下只有两条路：
+提高 `VermeerBootMemoryDxe` 的 `ADD_LIMIT`，或者启用 vendor 内存管理器。
+
 ## 3. 首屏三种结果
 
 ### A. 屏幕出现文字（内核 console 或 panic）

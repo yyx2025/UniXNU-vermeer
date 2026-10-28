@@ -147,6 +147,12 @@ volume = "VERMEERESP"
 # size the first boot needs. Raise it only together with a storage stage that adds
 # images, and re-check that `fastboot boot` still accepts the result.
 size_mib = 64
+# The RAM-root entry ("build payload --userland FILE") carries a whole filesystem next to the
+# kernel, so it gets its own ceiling: 52 MiB of kernel + 176 MiB of restore ramdisk is 228 MiB,
+# rounded up. That is above the 198 MB the stock ABL already refused, so this entry is a transfer
+# experiment as much as a boot experiment; the console entry above stays at 64 MiB until it is known
+# which side of the limit the boot image really falls on.
+size_mib_userland = 240
 loader = "firmware"
 title = "vermeer first boot: source 4K XNU to console"
 dram_size = "0x80000000"             # conservative first-boot window, as sheng

@@ -61,15 +61,25 @@ class MachO:
                 return off, size
         return None, None
 
-    def linkedit(self):
-        off, size = self.find(LC_SEGMENT_64)
+    def segment(self, wanted):
+        """Find a segment by name. The first LC_SEGMENT_64 is usually __PAGEZERO,
+        which is not what execSegBase should point at."""
+        fallback = None
         for off, c, size in self.commands:
             if c != LC_SEGMENT_64:
                 continue
             name = bytes(self.data[off + 8:off + 24]).rstrip(b'\0')
-            if name == b'__LINKEDIT':
-                return off
-        return None
+            fileoff, filesize = struct.unpack_from('<QQ', self.data, off + 40)
+            if name == wanted:
+                return off, fileoff, filesize
+            if fallback is None and filesize:
+                fallback = (off, fileoff, filesize)
+        if fallback is None:
+            raise SystemExit(f'no {wanted} segment')
+        return fallback
+
+    def linkedit(self):
+        return self.segment(b'__LINKEDIT')[0]
 
     def first_content_offset(self):
         """Lowest file offset that any section actually uses."""
@@ -194,9 +204,7 @@ def main():
 
         # __TEXT is the executable segment; its (fileoff, filesize) is what the
         # CodeDirectory records for exec-segment hardening.
-        text_off, _ = macho.find(LC_SEGMENT_64)
-        text_fileoff, = struct.unpack_from('<Q', macho.data, text_off + 40)
-        text_filesize, = struct.unpack_from('<Q', macho.data, text_off + 48)
+        _, text_fileoff, text_filesize = macho.segment(b'__TEXT')
 
         code_limit = (len(macho.data) + 15) & ~15
         slots = [b'\0' * 32] * ((code_limit + 4095) // 4096)

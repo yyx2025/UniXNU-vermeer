@@ -1,0 +1,6 @@
+vermeer userland 1.0 - root image N4KROOT, second file served by mockfs
+This file is /probe.bin. It is not part of the executable: it lives in the same
+RAM image, at a 4 KiB aligned offset, and the kernel's mockfs maps two vnodes
+onto one backing device. Reading it back from PID 1 is proof that the root is a
+real filesystem and not an exec of a single blob.
+panels: N81A panel, Goodix GT9916S @ 0x5d, uptime clock is XNU's, not ours.

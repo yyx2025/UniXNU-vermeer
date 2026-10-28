@@ -94,6 +94,26 @@ jobs:
           echo "$HOME/llvm-bin" >> "$GITHUB_PATH"
           ls -l "$HOME/llvm-bin"
 
+      - name: Test the signer and the container packer
+        run: |
+          python3 userland/test-adhoc.py
+          python3 - <<'PY'
+          import struct, subprocess, sys, tempfile, pathlib
+          tmp = pathlib.Path(tempfile.mkdtemp())
+          (tmp/'launchd.macho').write_bytes(b'\xcf\xfa\xed\xfe' + b'A' * 12345)
+          (tmp/'motd.txt').write_bytes(b'container test\n' * 4)
+          subprocess.run([sys.executable, 'userland/mkn4kroot.py',
+                          '--launch', str(tmp/'launchd.macho'),
+                          '--test', str(tmp/'motd.txt'),
+                          '--output', str(tmp/'userland.img')], check=True)
+          d = (tmp/'userland.img').read_bytes()
+          magic, ver, cnt, lo, ls, to, ts = struct.unpack_from('<8sII4Q', d, 0)
+          assert (magic, ver, cnt, lo) == (b'N4KROOT\x00', 1, 2, 4096), (magic, ver, cnt, lo)
+          assert to % 4096 == 0 and to >= 8192 and ls <= to - lo and ts <= len(d) - to
+          assert d[lo:lo + ls] == (tmp/'launchd.macho').read_bytes()
+          print('container: ok')
+          PY
+
       - name: Build the userland image
         run: |
           bash userland/build.sh "$GITHUB_WORKSPACE/userland-build"

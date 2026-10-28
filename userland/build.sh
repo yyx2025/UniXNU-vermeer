@@ -55,20 +55,61 @@ CFLAGS=(
 "$CC" "${CFLAGS[@]}" -c "$here/init.c"  -o "$out/init.o"
 
 link() {
-    # -headerpad reserves room in the load-command area: adhoc.py has to insert
-    # LC_CODE_SIGNATURE there, exactly like codesign would, and lld otherwise
-    # packs the sections right behind the commands with no gap.
     "$LD" -arch arm64 -platform_version ios 17.0 17.0 -static -e _start \
-        -headerpad 0x800 \
-        -o "$out/launchd.macho" "$out/start.o" "$out/libc.o" "$out/init.o" "$@"
+        -o "$out/launchd.macho" "$out/start.o" "$out/libc.o" "$out/init.o" "$@" 2>>"$out/link.log"
 }
 
-# lld rejects -no_pie on some versions and silently produces a PIE on others.
-# Try the non-PIE form first, then fall back and record which one stuck.
-if ! link -no_pie 2>"$out/link.log"; then
-    echo "retrying without -no_pie (see link.log)" >&2
-    link
+# Two independent things the linker has to get right, and neither is portable
+# across lld versions:
+#
+#   padding    adhoc.py has to insert a 16-byte LC_CODE_SIGNATURE where codesign
+#              would, which needs free space in the load-command area. -headerpad
+#              asks for it directly; -headerpad_max_install_names is the older
+#              spelling some builds only accept.
+#   non-PIE    a static image has nothing to slide, so it should not be a PIE.
+#
+# Try the richest form first and fall back one flag at a time, then verify the
+# result rather than trusting the flag that was accepted.
+: >"$out/link.log"
+linked=0
+for attempts in "-headerpad 0x800 -no_pie" "-headerpad 0x800" \
+                "-headerpad_max_install_names -no_pie" "-headerpad_max_install_names" ""; do
+    # shellcheck disable=SC2086
+    if link $attempts; then
+        echo "linked with: $attempts"
+        linked=1
+        break
+    fi
+done
+if [ "$linked" -ne 1 ]; then
+    echo "link failed; see $out/link.log" >&2
+    exit 1
 fi
+
+# The signing step needs room in the header. Check it here so a missing pad is a
+# build error with an explanation, not a signature the kernel will refuse.
+python3 - "$out/launchd.macho" <<'PY'
+import struct, sys
+data = open(sys.argv[1], 'rb').read()
+ncmds, sizeofcmds = struct.unpack_from('<II', data, 16)
+low, off = len(data), 32
+for _ in range(ncmds):
+    cmd, size = struct.unpack_from('<II', data, off)
+    if cmd == 0x19:
+        fileoff, = struct.unpack_from('<Q', data, off + 40)
+        nsects, = struct.unpack_from('<I', data, off + 64)
+        sect = off + 72
+        for _ in range(nsects):
+            ssize, = struct.unpack_from('<Q', data, sect + 40)
+            soff, = struct.unpack_from('<I', data, sect + 48)
+            if ssize:
+                low = min(low, fileoff + soff)
+            sect += 80
+    off += size
+gap = low - (32 + sizeofcmds)
+print(f'header gap: {gap} bytes')
+sys.exit(0 if gap >= 16 else 1)
+PY
 
 python3 "$here/adhoc.py" "$out/launchd.macho" \
     --identifier org.vermeer.userland \

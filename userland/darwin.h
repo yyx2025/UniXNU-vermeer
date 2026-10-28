@@ -101,39 +101,39 @@ struct sysinfo_vals {
 	char machine[64];
 };
 
-extern long _syscall_raw(long number, long a, long b, long c, long d, long e, long f);
+extern long syscall_raw(long number, long a, long b, long c, long d, long e, long f);
 
-static inline long sys_exit(int code)              { return _syscall_raw(SYS_exit, code, 0, 0, 0, 0, 0); }
-static inline long sys_fork(void)                  { return _syscall_raw(SYS_fork, 0, 0, 0, 0, 0, 0); }
-static inline long sys_read(int fd, void *b, usize n)  { return _syscall_raw(SYS_read, fd, (long)b, n, 0, 0, 0); }
-static inline long sys_write(int fd, const void *b, usize n) { return _syscall_raw(SYS_write, fd, (long)b, n, 0, 0, 0); }
-static inline long sys_open(const char *p, int f, int m) { return _syscall_raw(SYS_open, (long)p, f, m, 0, 0, 0); }
-static inline long sys_close(int fd)               { return _syscall_raw(SYS_close, fd, 0, 0, 0, 0, 0); }
-static inline long sys_wait4(int pid, int *st, int opt, void *ru) { return _syscall_raw(SYS_wait4, pid, (long)st, opt, (long)ru, 0, 0); }
-static inline long sys_getpid(void)                { return _syscall_raw(SYS_getpid, 0, 0, 0, 0, 0, 0); }
-static inline long sys_getppid(void)               { return _syscall_raw(SYS_getppid, 0, 0, 0, 0, 0, 0); }
-static inline long sys_getuid(void)                { return _syscall_raw(SYS_getuid, 0, 0, 0, 0, 0, 0); }
-static inline long sys_geteuid(void)               { return _syscall_raw(SYS_geteuid, 0, 0, 0, 0, 0, 0); }
-static inline long sys_kill(int pid, int sig, int posix) { return _syscall_raw(SYS_kill, pid, sig, posix, 0, 0, 0); }
-static inline long sys_execve(const char *f, char **a, char **e) { return _syscall_raw(SYS_execve, (long)f, (long)a, (long)e, 0, 0, 0); }
-static inline long sys_access(const char *p, int m) { return _syscall_raw(SYS_access, (long)p, m, 0, 0, 0, 0); }
-static inline long sys_setsid(void)                { return _syscall_raw(SYS_setsid, 0, 0, 0, 0, 0, 0); }
-static inline long sys_umask(int m)                { return _syscall_raw(SYS_umask, m, 0, 0, 0, 0, 0); }
-static inline long sys_lseek(int fd, i64 off, int whence) { return _syscall_raw(SYS_lseek, fd, off, whence, 0, 0, 0); }
+static inline long sys_exit(int code)              { return syscall_raw(SYS_exit, code, 0, 0, 0, 0, 0); }
+static inline long sys_fork(void)                  { return syscall_raw(SYS_fork, 0, 0, 0, 0, 0, 0); }
+static inline long sys_read(int fd, void *b, usize n)  { return syscall_raw(SYS_read, fd, (long)b, n, 0, 0, 0); }
+static inline long sys_write(int fd, const void *b, usize n) { return syscall_raw(SYS_write, fd, (long)b, n, 0, 0, 0); }
+static inline long sys_open(const char *p, int f, int m) { return syscall_raw(SYS_open, (long)p, f, m, 0, 0, 0); }
+static inline long sys_close(int fd)               { return syscall_raw(SYS_close, fd, 0, 0, 0, 0, 0); }
+static inline long sys_wait4(int pid, int *st, int opt, void *ru) { return syscall_raw(SYS_wait4, pid, (long)st, opt, (long)ru, 0, 0); }
+static inline long sys_getpid(void)                { return syscall_raw(SYS_getpid, 0, 0, 0, 0, 0, 0); }
+static inline long sys_getppid(void)               { return syscall_raw(SYS_getppid, 0, 0, 0, 0, 0, 0); }
+static inline long sys_getuid(void)                { return syscall_raw(SYS_getuid, 0, 0, 0, 0, 0, 0); }
+static inline long sys_geteuid(void)               { return syscall_raw(SYS_geteuid, 0, 0, 0, 0, 0, 0); }
+static inline long sys_kill(int pid, int sig, int posix) { return syscall_raw(SYS_kill, pid, sig, posix, 0, 0, 0); }
+static inline long sys_execve(const char *f, char **a, char **e) { return syscall_raw(SYS_execve, (long)f, (long)a, (long)e, 0, 0, 0); }
+static inline long sys_access(const char *p, int m) { return syscall_raw(SYS_access, (long)p, m, 0, 0, 0, 0); }
+static inline long sys_setsid(void)                { return syscall_raw(SYS_setsid, 0, 0, 0, 0, 0, 0); }
+static inline long sys_umask(int m)                { return syscall_raw(SYS_umask, m, 0, 0, 0, 0, 0); }
+static inline long sys_lseek(int fd, i64 off, int whence) { return syscall_raw(SYS_lseek, fd, off, whence, 0, 0, 0); }
 static inline void *sys_mmap(void *a, usize l, int p, int f, int fd, i64 off) {
-	return (void *)_syscall_raw(SYS_mmap, (long)a, l, p, f, fd, off);
+	return (void *)syscall_raw(SYS_mmap, (long)a, l, p, f, fd, off);
 }
-static inline long sys_munmap(void *a, usize l)     { return _syscall_raw(SYS_munmap, (long)a, l, 0, 0, 0, 0); }
-static inline long sys_gettimeofday(struct timeval32 *tv) { return _syscall_raw(SYS_gettimeofday, (long)tv, 0, 0, 0, 0, 0); }
+static inline long sys_munmap(void *a, usize l)     { return syscall_raw(SYS_munmap, (long)a, l, 0, 0, 0, 0); }
+static inline long sys_gettimeofday(struct timeval32 *tv) { return syscall_raw(SYS_gettimeofday, (long)tv, 0, 0, 0, 0, 0); }
 static inline long sys_sysctl(int *name, u32 n, void *old, usize *oldlen, void *nw, usize newlen) {
-	return _syscall_raw(SYS_sysctl, (long)name, n, (long)old, (long)oldlen, (long)nw, newlen);
+	return syscall_raw(SYS_sysctl, (long)name, n, (long)old, (long)oldlen, (long)nw, newlen);
 }
-static inline long sys_reboot(int how)              { return _syscall_raw(SYS_reboot, how, 0, 0, 0, 0, 0); }
+static inline long sys_reboot(int how)              { return syscall_raw(SYS_reboot, how, 0, 0, 0, 0, 0); }
 
 /* nanosleep through __semwait_signal, which is how libSystem implements it too:
  * no semaphore, a relative timeout, and the thread blocks in the kernel. */
 static inline long sys_nanosleep(i64 sec, i64 nsec) {
-	return _syscall_raw(SYS_semwait_signal, 0, 0, 1, 1, sec, nsec);
+	return syscall_raw(SYS_semwait_signal, 0, 0, 1, 1, sec, nsec);
 }
 
 #endif

@@ -22,6 +22,17 @@ name: build-kernel
 on:
   push:
     branches: [main, master]
+    # A kernel build costs ~35 macOS minutes, and only these inputs can change its output.
+    # Documentation, the userland directory and the other workflows are not on the list, so
+    # editing them no longer queues a rebuild; the bootimg-only and userland workflows exist
+    # to redo the cheap steps against an existing kernel artifact.
+    paths:
+      - 'configs/**'
+      - 'board.toml'
+      - 'porting.toml'
+      - 'scripts/**'
+      - 'drivers/**'
+      - 'patches/**'
   workflow_dispatch:
     inputs:
       unique_chip_id:

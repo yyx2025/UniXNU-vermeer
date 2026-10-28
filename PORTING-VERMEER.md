@@ -47,6 +47,8 @@ Undefined symbols for architecture arm64:
 | --- | --- | --- |
 | UFS 控制器 | `ufshc@1d84000`（`+0x3000`，第三段 `0x1d90000+0x9000`），irq **265** | base DT |
 | UFS PHY | `ufsphy_mem@1d80000` | base DT |
+| UFS 颗粒 | **SK 海力士**（SK hynix），`manufacturer_id` 预期 `0x03` | 机主确认 |
+| 内存颗粒 | **美光**（Micron）LPDDR5X | 机主确认 |
 | SPMI PMIC-arb | `spmi@c42d000`（第二路 `@c432000`） | base DT |
 | PMIC | `pm8550@1`、`pm8550vs@2/3/4/6`、`pm8550ve@5`、`pm8550b@7`、`pm8010@c/d`、`pmk8550@0` | base DT |
 | 触摸 | **Goodix GT9916S**，I²C-addr `0x5d`，IRQ 25；主控 SE4 GPIO 44–47 / reset 24，次控 `gt9916S2` SE8 GPIO 56–59 | dtbo overlay |
@@ -60,6 +62,8 @@ Undefined symbols for architecture arm64:
 | splash | `/reserved-memory/splash_region` 由 `bootimg.dtb_node` 注入，否则 ABL 关屏 | `board.toml` |
 
 > 显存/面板：**video-mode** 面板会持续扫描内存缓冲区，写什么显示什么，因此首启不需要写显示控制器（command-mode 的 Pixel 4/6a 才必须先接管控制器）。
+
+> 颗粒：DTB 不写厂商（UFS 的 `manufacturer_id` 只在 device descriptor 里，LPDDR 的厂商在 ABL 读 MR 时才有）。**sheng 是三星 UFS + 三星内存**，所以 `NativeUfs` 里任何按厂商分支或写死时序的地方都不能照抄。恢复 UFS 阶段时的第一步不是读盘，是**认设备**：`hostQueryRead()` 目前只允许 `0x03`/`0x05`，连 `READ DESCRIPTOR(0x01)` 都没放开，所以先给它加 `0x01`、读 device descriptor 前 `0x20` 字节、看 offset `0x15` 是不是 `0x03`（SK hynix）。认对了再谈初始化；海力士的 Write Booster / auto-hibernate 在 bring-up 阶段先关掉走常规读写，避免把 cache 行为当成控制器缺陷。
 
 ## 4. 首启前必须解决的缺口
 

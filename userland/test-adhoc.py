@@ -25,6 +25,7 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 LC_SEGMENT_64 = 0x19
 LC_CODE_SIGNATURE = 0x1D
+LC_LOAD_DYLINKER = 0x0E
 
 
 def build_macho():
@@ -48,14 +49,30 @@ def build_macho():
     cmds += section(b'__text', b'__TEXT', 0x100000800, len(text), text_off)
     cmds += segment(b'__LINKEDIT', 0x100004000, 0x1000, link_off, len(linkedit), 0, 1)
 
-    ncmds = 4
-    header = struct.pack('<IIIIIIII', 0xFEEDFACF, 0x0100000C, 0, 2, ncmds, len(cmds), 0, 0)
+    # What ld64.lld really emits when it answers "-static" with "not yet implemented":
+    # a dynamic-linker command and the flags that go with it.
+    dyld_path = b'/usr/lib/dyld\x00'
+    dyld_path += b'\x00' * ((8 - len(dyld_path) % 8) % 8)
+    cmds += struct.pack('<III', 0x0E, 24 + len(dyld_path), 12) + dyld_path
+    flags = 0x4 | 0x200000          # MH_DYLDLINK | MH_PIE, as the linker leaves them
+
+    ncmds = 5
+    header = struct.pack('<IIIIIIII', 0xFEEDFACF, 0x0100000C, 0, 2, ncmds, len(cmds), flags, 0)
     image = bytearray(header + cmds)
     # -headerpad: leave real zeros between the commands and the first section.
     image += b'\0' * (text_off - len(image))
     image += text
     image += linkedit
     return bytes(image)
+
+
+def macho_commands(image):
+    ncmds, = struct.unpack_from('<I', image, 16)
+    off = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from('<II', image, off)
+        yield off, cmd, size
+        off += size
 
 
 def check(cond, message):
@@ -96,6 +113,14 @@ def main():
                     linkedit_off = off
             off += size
         check(sig_off is not None, 'LC_CODE_SIGNATURE was inserted')
+
+        # Nothing may point at a dyld this root does not have.
+        cmds_present = {c for _, c, _ in macho_commands(image)}
+        check(LC_LOAD_DYLINKER not in cmds_present, 'LC_LOAD_DYLINKER was removed')
+        flags_after, = struct.unpack_from('<I', image, 24)
+        check(not flags_after & 0x4, 'MH_DYLDLINK was cleared')
+        check(not flags_after & 0x200000, 'MH_PIE was cleared')
+        check(flags_after & 0x1, 'MH_NOUNDEFS was set')
         check(32 + sizeofcmds <= 0x800, 'load commands still fit the header padding')
         check(b'__TEXT' in names and b'__PAGEZERO' in names, 'both segments are present')
 

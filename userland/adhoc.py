@@ -26,6 +26,16 @@ import uuid
 MH_MAGIC_64 = 0xFEEDFACF
 LC_SEGMENT_64 = 0x19
 LC_CODE_SIGNATURE = 0x1D
+LC_LOAD_DYLINKER = 0x0E
+LC_LOAD_DYLIB = 0x0C
+LC_LOAD_WEAK_DYLIB = 0x80000018
+LC_REEXPORT_DYLIB = 0x8000001F
+LC_LAZY_LOAD_DYLIB = 0x20
+MH_NOUNDEFS = 0x1
+MH_DYLDLINK = 0x4
+MH_PIE = 0x200000
+DYNAMIC_COMMANDS = {LC_LOAD_DYLINKER, LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB,
+                    LC_REEXPORT_DYLIB, LC_LAZY_LOAD_DYLIB}
 
 CSMAGIC_EMBEDDED_SIGNATURE = 0xFADE0CC0
 CSMAGIC_CODEDIRECTORY = 0xFADE0C02
@@ -106,6 +116,44 @@ class MachO:
         if not dataoff or not datasize:
             return None
         return bytes(self.data[dataoff:dataoff + datasize])
+
+    def normalize_static(self):
+        """Make the image a static one, whatever the linker thought of -static.
+
+        ld64.lld answers "-static" with "Option `-static' is not yet implemented",
+        so the image comes out of the linker as an ordinary executable: it carries
+        LC_LOAD_DYLINKER and the MH_DYLDLINK / MH_PIE flags, and the kernel would
+        hand it to a dyld that does not exist in this root. Drop those commands,
+        compact the load-command area, and clear the flags. Nothing here is
+        referenced by the program: it has no LC_LOAD_DYLIB and no symbols to fix
+        up, so removing the marker is honest rather than a workaround.
+        """
+        kept, removed = [], []
+        for off, cmd, size in self.commands:
+            if cmd in DYNAMIC_COMMANDS:
+                removed.append((cmd, bytes(self.data[off:off + size])))
+            else:
+                kept.append((off, cmd, size))
+        if not removed:
+            return []
+
+        blob = bytearray()
+        rebuilt = []
+        for off, cmd, size in kept:
+            rebuilt.append((32 + len(blob), cmd, size))
+            blob += self.data[off:off + size]
+        old_end = 32 + self.sizeofcmds
+        self.data[32:old_end] = b'\0' * (old_end - 32)
+        self.data[32:32 + len(blob)] = blob
+        self.commands = rebuilt
+        self.ncmds = len(rebuilt)
+        self.sizeofcmds = len(blob)
+        struct.pack_into('<I', self.data, 16, self.ncmds)
+        struct.pack_into('<I', self.data, 20, self.sizeofcmds)
+
+        self.flags = (self.flags | MH_NOUNDEFS) & ~(MH_DYLDLINK | MH_PIE)
+        struct.pack_into('<I', self.data, 24, self.flags)
+        return removed
 
     def add_code_signature_command(self):
         """Put LC_CODE_SIGNATURE in the header padding. Returns its offset."""
@@ -200,6 +248,11 @@ def main():
         code_limit = struct.unpack_from('>I', cd, 32)[0]
         signed = original
     else:
+        # Strip the dynamic-linker commands first: this also frees load-command
+        # space, so the margin left by -headerpad is not the only headroom.
+        removed = macho.normalize_static()
+        if removed:
+            print('removed load commands: ' + ', '.join(f'0x{c:08x}' for c, _ in removed))
         lc = macho.add_code_signature_command()
 
         # __TEXT is the executable segment; its (fileoff, filesize) is what the
@@ -251,6 +304,7 @@ def main():
                 'identifier': args.identifier,
                 'cdhash': cdhash.hex(),
                 'code_directory_bytes': len(cd),
+                'removed_load_commands': [f'0x{c:08x}' for c, _ in (removed if sig is None else [])],
                 'trust_cache_sha256': hashlib.sha256(bundle).hexdigest(),
             }, f, indent=2)
             f.write('\n')
